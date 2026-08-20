@@ -96,16 +96,9 @@ The following result uses the local test prices, 50 history observations, a
 
 These are baseline measurements. They are not model measurements.
 
-The current-code CPU pilot is also measured across the same 51 origins.
-It uses a 64-dimensional model, two Transformer layers, five epochs, 20 samples,
-and 10 reverse-SDE steps.
-
-| Experiment | MAE | RMSE | CRPS | 50% coverage | 90% coverage |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Current CPU pilot | 0.26317 | 0.33103 | 0.30904 | 0.943 | 1.000 |
-
-The pilot is a negative result. Its CRPS is worse than the historical bootstrap baseline.
-See [`results/benchmark_metrics.csv`](results/benchmark_metrics.csv).
+The repository does not report a final model score. The available current-code run
+uses five epochs, so it is a smoke test for the training and evaluation pipeline.
+It is not a final model result.
 
 Run the guidance ablation with:
 
@@ -115,8 +108,8 @@ python -m src.benchmarks.model_guidance_ablation \
   --output outputs/current_cpu_pilot_guidance.csv
 ```
 
-The pilot produced identical metrics for guidance weights 0.00, 0.25, and 1.00.
-This negative ablation result indicates that five training epochs do not learn useful guidance.
+This command supports guidance-weight comparisons after a sufficiently trained
+current-code checkpoint is available.
 
 ## Current limitations
 
@@ -124,7 +117,9 @@ This negative ablation result indicates that five training epochs do not learn u
 - Checkpoints and prediction runs require local data that is not stored in Git.
 - The baseline and model rolling-origin commands write separate metric files.
 - Checkpoints from the historical model implementation are incompatible with the current model class. Retrain them with the current source code.
-- A full model quality table requires a current-code checkpoint. The repository has only historical checkpoints, so the model command currently serves as a reproducible evaluation path.
+- The repository does not include a final current-code model quality table.
+- The historical checkpoints require the historical model implementation.
+- The current-code pilot is a five-epoch smoke test and must not represent final model quality.
 
 Run the protocol ablation with:
 
