@@ -1,92 +1,131 @@
-# Wavelet Diff
+# Wavelet Diffusion for Probabilistic Time-Series Forecasting
 
-This project tests a wavelet-conditioned score transformer for probabilistic time-series forecasting.
+## Abstract
 
-## Project layout
+This project studies a diffusion model for probabilistic forecasting of financial time series.
+The model combines a Transformer score network with a stationary wavelet transform (SWT).
+The wavelet representation separates a time series into components at multiple temporal scales.
+The diffusion process generates plausible future trajectories from noisy wavelet coefficients.
 
-- `src/model/` contains the model, SDE, training, sampling, and data-loading code.
-- `src/benchmarks/` contains exploratory baseline scripts.
-- `data/` contains local raw, processed, and wavelet data.
-- `outputs/` contains local checkpoints, plots, and prediction runs.
-- `Documentation/` contains the current model notes.
-- `tests/` contains fast shape and data-contract tests.
+The repository contains the model, training code, inverse-SWT reconstruction, rolling-origin evaluation, baseline methods, and unit tests.
+The current-code five-epoch run validates the pipeline only.
+It does not provide a final estimate of model quality.
 
-Large data and model outputs are local artifacts. The repository ignores them.
+## 1. Introduction
 
-## Environment
+Time-series forecasting estimates future observations from a finite history.
+Financial time series make this task difficult because they contain noise, changing volatility, and weakly stable temporal structure.
+Point forecasts hide this uncertainty by returning one trajectory.
+Probabilistic forecasts represent uncertainty with an ensemble of future trajectories.
 
-Create the Conda environment with:
+Diffusion models provide one approach to probabilistic generation.
+They define a forward process that gradually adds noise to data, then learn a reverse process that removes noise.
+The reverse process starts from Gaussian noise and produces samples from the learned data distribution.
+This project applies that idea to future windows of a time series.
 
-```bash
-conda env create -f environment.yml
-conda activate wavelet-diff
+The project uses wavelets because temporal patterns occur at different scales.
+An SWT decomposes a signal into detail bands and a coarse approximation band.
+The model predicts all future bands, then reconstructs the future signal with the inverse SWT.
+
+## 2. Diffusion background
+
+Let $x_0$ denote a clean data sample.
+The forward diffusion process defines increasingly noisy variables:
+
+$$
+q(x_t \mid x_{t-1}) = \mathcal{N}\left(x_t; \sqrt{1-\beta_t}\,x_{t-1},\; \beta_t I\right),
+\qquad t = 1, \ldots, T.
+$$
+
+Here, $\beta_t$ controls the noise added at step $t$.
+With $\bar{\alpha}_t = \prod_{s=1}^{t}(1-\beta_s)$, the noisy sample has the closed form:
+
+$$
+x_t = \sqrt{\bar{\alpha}_t}\,x_0 + \sqrt{1-\bar{\alpha}_t}\,\epsilon,
+\qquad \epsilon \sim \mathcal{N}(0,I).
+$$
+
+The reverse model learns a score or a noise estimate that identifies the direction toward less noisy data.
+At inference time, the sampler starts with $x_T \sim \mathcal{N}(0,I)$ and applies the learned reverse dynamics.
+The DDPM formulation provides the foundation for this denoising procedure ([Ho et al., 2020](https://arxiv.org/abs/2006.11239)).
+
+![Forward diffusion adds Gaussian noise to a clean frame.](docs/images/diffusion_forward_process.png)
+
+*Figure 1. A visual analogy for the forward diffusion process.*
+The figure uses a video-like frame to show progressive noise addition.
+This project applies the same idea to numerical time-series windows and wavelet coefficients.
+
+## 3. Wavelet representation
+
+For an input window $y \in \mathbb{R}^{L}$, the level-four SWT with the Daubechies-4 wavelet produces four detail bands and one approximation band:
+
+$$
+\mathcal{W}(y) = \left[cD_1, cD_2, cD_3, cD_4, cA_4\right].
+$$
+
+The transform preserves the time-aligned structure of the signal.
+The detail bands represent changes at different scales.
+The approximation band represents the coarser signal structure.
+The implementation pads windows to a length divisible by $2^4$ when required.
+The inverse SWT removes this padding after reconstruction.
+
+The model receives tensors with shape $[N, L, 5, 1]$.
+Here, $N$ is the number of windows, $L$ is the window length, and the five bands are the wavelet channels.
+The model predicts the future portion of every band.
+The inverse transform combines the predicted bands into a forecast in the original signal domain.
+
+## 4. Conditional forecasting model
+
+Given a history window $y_{1:H}$, the model generates samples for the future horizon $y_{H+1:H+K}$.
+The Transformer score network receives the observed history, noisy future coefficients, diffusion time, and guidance information.
+The reverse SDE generates a sample of future wavelet coefficients.
+The inverse SWT maps that sample back to the signal domain.
+
+The training objective combines a score-matching term with a multiscale reconstruction term:
+
+$$
+\mathcal{L}
+= \mathcal{L}_{\mathrm{score}}
+  + \lambda_{\mathrm{wavelet}}\mathcal{L}_{\mathrm{wavelet}}.
+$$
+
+The score term trains the diffusion model to estimate the denoising direction.
+The wavelet term preserves consistency across the predicted frequency bands.
+The implementation uses a variance-preserving SDE and a Transformer score network.
+
+```mermaid
+flowchart LR
+    accTitle: Wavelet Diffusion Forecasting
+    accDescr: The forecasting model decomposes a time-series window into wavelet bands, denoises future bands with a conditional Transformer, and reconstructs forecast samples with the inverse SWT.
+
+    series[Time-series window] --> swt[Level-4 SWT]
+    swt --> bands[Five wavelet bands]
+    history[Observed history] --> transformer[Conditional Transformer score network]
+    bands --> noisy[Noisy future bands]
+    noisy --> transformer
+    transformer --> reverse[Reverse SDE sampling]
+    reverse --> predicted[Predicted future bands]
+    predicted --> iswt[Inverse SWT]
+    iswt --> forecast[Probabilistic forecast samples]
 ```
 
-Install the package in editable mode. This step lets `src.model` imports resolve
-without path hacks, and it lets you run modules with `python -m`.
+## 5. Data and experimental protocol
 
-```bash
-pip install -e .
-```
+The project uses Bitcoin price data and models log returns rather than raw prices.
+The data pipeline creates training and testing windows from local CSV files.
+The default evaluation uses 50 observations of history and a 20-observation forecast horizon.
 
-Run the checks with:
+The rolling-origin evaluator prevents future observations from entering a forecast input.
+At each origin, a forecast function receives only the preceding history window.
+The evaluator reports mean absolute error (MAE), root mean squared error (RMSE), CRPS, and interval coverage.
 
-```bash
-ruff check src data tests
-pytest -q
-```
+The repository includes three simple baselines:
 
-## Data workflow
+1. Zero return predicts a zero future return at every step.
+2. Last return repeats the most recent observed return.
+3. Historical bootstrap samples observed returns from the available history.
 
-Run commands from the repository root. Run `data/data_cleaner.py` to create the train and test CSV files.
-
-Run the wavelet conversion notebook to create the `.pt` tensors. The notebook still needs conversion to a script.
-
-## Model workflow
-
-Run all model modules with `python -m`, from the repository root, so package-relative
-imports resolve correctly.
-
-Run `python -m src.model.trainer` to train the score transformer. Run
-`python -m src.model.predictandsave --checkpoint outputs/checkpoints/model.pth`
-to sample forecasts. The sampler accepts sample counts, window counts, diffusion
-steps, and a seed from the command line.
-
-Run the bounded CPU pilot with:
-
-```bash
-python -m src.model.trainer --config configs/current_cpu_pilot.json
-```
-
-The evaluation module uses rolling origins. Each forecast function receives only
-the `history_len` observations before an origin and returns samples with shape
-`[n_samples, predict_len]`. The evaluator reports MAE, RMSE, CRPS, and 50% and
-90% interval coverage.
-
-Run the baseline benchmark with:
-
-```bash
-python -m src.benchmarks.rolling_baselines \
-  --input data/Testing\ Data/bitcoin_raw_prices_test.csv \
-  --output outputs/baseline_metrics.csv
-```
-
-Run a compatible model checkpoint with the same rolling-origin metrics:
-
-```bash
-python -m src.benchmarks.model_rolling_evaluation \
-  --checkpoint outputs/checkpoints/current_model.pth \
-  --output outputs/model_metrics.csv
-```
-
-The command also writes a per-origin metrics file beside the aggregate file.
-
-The pipeline reconstructs each sampled future from all SWT bands with the inverse SWT.
-
-### Baseline result
-
-The following result uses the local test prices, 50 history observations, a
-20-observation horizon, stride 20, 100 bootstrap samples, and seed 42.
+The baseline protocol uses 51 test origins, 100 samples for stochastic forecasts, and seed 42.
 
 | Baseline | MAE | RMSE | CRPS | 50% coverage | 90% coverage | Origins |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -94,43 +133,81 @@ The following result uses the local test prices, 50 history observations, a
 | Last return | 0.02473 | 0.03113 | 0.02473 | 0.000 | 0.000 | 51 |
 | Historical bootstrap | 0.01841 | 0.02530 | 0.01413 | 0.485 | 0.864 | 51 |
 
-These are baseline measurements. They are not model measurements.
+These values are baseline measurements.
+They do not represent a final diffusion-model result.
 
-The repository does not report a final model score. The available current-code run
-uses five epochs, so it is a smoke test for the training and evaluation pipeline.
-It is not a final model result.
+## 6. Qualitative results
 
-Run the guidance ablation with:
+Figure 2 shows the full price and wavelet-band history.
+The vertical split separates the training and test ranges.
+The lower panels show the detail and approximation bands used by the model.
+
+![Bitcoin price, returns, and wavelet bands.](docs/images/wavelet_history_with_price.png)
+
+*Figure 2. The Bitcoin price series, daily log returns, and five wavelet bands.*
+
+Figures 3–5 show historical prediction outputs.
+The blue line shows the history, the green line shows the true future, and the red dashed line shows the median prediction.
+The shaded regions show the 80% interval and the interquartile range.
+These figures demonstrate the forecast and uncertainty visualizations produced by the project.
+They are qualitative historical outputs, not a controlled final benchmark.
+
+| Forecast example | Artifact |
+| --- | --- |
+| Window 816 | ![Price forecast for window 816](docs/images/price_forecast_window_816.png) |
+| Window 834 | ![Price forecast for window 834](docs/images/price_forecast_window_834.png) |
+| Window 453 | ![Price forecast for window 453](docs/images/price_forecast_window_453.png) |
+
+## 7. Reproducibility
+
+Create the Conda environment and install the package:
 
 ```bash
-python -m src.benchmarks.model_guidance_ablation \
-  --checkpoint outputs/checkpoints/current_cpu_pilot/score_transformer_pilot_ep5.pth \
-  --output outputs/current_cpu_pilot_guidance.csv
+conda env create -f environment.yml
+conda activate wavelet-diff
+pip install -e .
 ```
 
-This command supports guidance-weight comparisons after a sufficiently trained
-current-code checkpoint is available.
-
-## Current limitations
-
-- Training and sampling use configuration values in `src/model/config.py`.
-- Checkpoints and prediction runs require local data that is not stored in Git.
-- The baseline and model rolling-origin commands write separate metric files.
-- Checkpoints from the historical model implementation are incompatible with the current model class. Retrain them with the current source code.
-- The repository does not include a final current-code model quality table.
-- The historical checkpoints require the historical model implementation.
-- The current-code pilot is a five-epoch smoke test and must not represent final model quality.
-
-Run the protocol ablation with:
+Run the tests and linter:
 
 ```bash
-python -m src.benchmarks.baseline_ablation \
+ruff check src data tests
+pytest -q
+```
+
+Train the bounded CPU pilot:
+
+```bash
+python -m src.model.trainer --config configs/current_cpu_pilot.json
+```
+
+Run the rolling-origin baseline evaluation:
+
+```bash
+python -m src.benchmarks.rolling_baselines \
   --input data/Testing\ Data/bitcoin_raw_prices_test.csv \
-  --output outputs/baseline_ablation.csv
+  --output outputs/baseline_metrics.csv
 ```
 
-This ablation tests history lengths of 20, 50, and 100 observations.
-It tests forecast horizons of 5 and 20 observations.
+Run model evaluation after training a compatible current-code checkpoint:
+
+```bash
+python -m src.benchmarks.model_rolling_evaluation \
+  --checkpoint outputs/checkpoints/current_model.pth \
+  --output outputs/model_metrics.csv
+```
+
+## 8. Limitations
+
+The repository does not include a final current-code model quality table.
+The available current-code run uses five epochs and acts as a pipeline smoke test.
+The historical checkpoints require the historical model implementation because their parameter shapes do not match the current architecture.
+Training and prediction require local data that the repository does not store.
+
+## References
+
+1. Ho, J., Jain, A., and Abbeel, P. *Denoising Diffusion Probabilistic Models*. 2020. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239).
+2. Nason, G. P. and von Sachs, R. *Wavelet Processes and Adaptive Estimation of the Evolutionary Wavelet Spectrum*. 1999. [Biometrika](https://doi.org/10.1093/biomet/86.4.873).
 
 ## License
 
