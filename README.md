@@ -25,6 +25,33 @@ The project uses wavelets because temporal patterns occur at different scales.
 An SWT decomposes a signal into detail bands and a coarse approximation band.
 The model predicts all future bands, then reconstructs the future signal with the inverse SWT.
 
+The forecast is conditional because the model receives the observed history as context.
+Let $c = \mathcal{W}(y_{1:H})$ denote the wavelet representation of the history.
+Let $z_0 = \mathcal{W}(y_{H+1:H+K})$ denote the clean future coefficients.
+The model targets the conditional distribution:
+
+$$
+p_\theta\left(y_{H+1:H+K} \mid y_{1:H}\right)
+\quad\text{through}\quad
+p_\theta\left(z_0 \mid c\right).
+$$
+
+At diffusion time $t$, the conditional score function is:
+
+$$
+s_\theta(z_t,t,c)
+\approx
+\nabla_{z_t}\log p_t(z_t \mid c).
+$$
+
+This score gives the denoising direction for the noisy future coefficients $z_t$.
+The history context $c$ guides every reverse-SDE step toward futures that match the observed series.
+The inverse SWT maps each generated coefficient sample back to a future trajectory.
+
+![Conditional score network reverses noise with history context.](docs/images/conditional_score_reverse_process.png)
+
+*Figure 1. The conditional score network uses the observed history to guide the reverse-SDE trajectory from noise to forecast samples.*
+
 ## 2. Diffusion background
 
 Let $x_0$ denote a clean data sample.
@@ -49,7 +76,7 @@ The DDPM formulation provides the foundation for this denoising procedure ([Ho e
 
 ![Forward diffusion adds Gaussian noise to a clean frame.](docs/images/diffusion_forward_process.png)
 
-*Figure 1. A visual analogy for the forward diffusion process.*
+*Figure 2. A visual analogy for the forward diffusion process.*
 The figure uses a video-like frame to show progressive noise addition.
 This project applies the same idea to numerical time-series windows and wavelet coefficients.
 
@@ -133,13 +160,13 @@ They do not represent a final diffusion-model result.
 
 ## 6. Qualitative results
 
-Figure 2 shows the full price and wavelet-band history.
+Figure 3 shows the full price and wavelet-band history.
 The vertical split separates the training and test ranges.
 The lower panels show the detail and approximation bands used by the model.
 
 ![Bitcoin price, returns, and wavelet bands.](docs/images/wavelet_history_with_price.png)
 
-*Figure 2. The Bitcoin price series, daily log returns, and five wavelet bands.*
+*Figure 3. The Bitcoin price series, daily log returns, and five wavelet bands.*
 
 Figures 3–5 show historical prediction outputs.
 The blue line shows the history, the green line shows the true future, and the red dashed line shows the median prediction.
