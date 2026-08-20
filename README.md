@@ -82,10 +82,7 @@ The inverse SWT maps that sample back to the signal domain.
 The training objective combines a score-matching term with a multiscale reconstruction term:
 
 $$
-\mathcal{L}
-= \mathcal{L}_{\mathrm{score}}
-  + \lambda_{\mathrm{wavelet}}\mathcal{L}_{\mathrm{wavelet}}.
-$$
+\mathcal{L}= \mathcal{L}_{\mathrm{score}}  + \lambda_{\mathrm{wavelet}}\mathcal{L}_{\mathrm{wavelet}}.$$
 
 The score term trains the diffusion model to estimate the denoising direction.
 The wavelet term preserves consistency across the predicted frequency bands.
