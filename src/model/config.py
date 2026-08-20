@@ -1,6 +1,9 @@
 # src/model/config.py
 
 import os
+import random
+
+import numpy as np
 import torch
 
 PROJECT_ROOT      = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -23,6 +26,7 @@ def ensure_output_dirs() -> None:
 
 CONFIG = {
     "project_root": PROJECT_ROOT,
+    "seed": 42,
     "device": "cuda" if torch.cuda.is_available() else "cpu",
     "history_len": 50,
     "predict_len": 20,
@@ -74,6 +78,15 @@ CONFIG = {
     #   train_wavelet/wavelet_means.pt  (shape [5,feat_dim])
     #   train_wavelet/wavelet_stds.pt   (shape [5,feat_dim])
 }
+
+
+def seed_everything(seed: int) -> None:
+    """Seed Python, NumPy, and PyTorch random number generators."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def find_latest_checkpoint(save_name: str = CONFIG["save_name"], checkpoint_dir: str = CHECKPOINT_DIR) -> str:

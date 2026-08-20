@@ -129,11 +129,9 @@ with:
 - $\text{score\_term} = -0.5 \cdot \sigma(t)^2 \cdot s_\theta(x_t, t)$
 - $\text{noise} \sim \mathcal{N}(0, I)$
 
-Wavelet coefficients are unnormalized and reconstructed to return space using the approximation band ($cA4$) via:
-
-$$
-\texttt{approx\_band} = \texttt{wave}[\space : \space , -1]
-$$
+Wavelet coefficients are unnormalized and reconstructed to return space using the full inverse SWT.
+The project stores bands as $[cD1, cD2, cD3, cD4, cA4]$.
+The inverse transform maps these bands back to the time domain before price conversion.
 
 ---
 

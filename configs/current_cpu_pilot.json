@@ -1,0 +1,15 @@
+{
+  "device": "cpu",
+  "seed": 42,
+  "model_dim": 64,
+  "num_heads": 4,
+  "num_layers": 2,
+  "samples_per_epoch": 128,
+  "batch_size": 16,
+  "num_workers": 0,
+  "n_epochs": 5,
+  "checkpoint_freq": 5,
+  "checkpoint_dir": "outputs/checkpoints/current_cpu_pilot",
+  "save_name": "score_transformer_pilot",
+  "use_amp": false
+}

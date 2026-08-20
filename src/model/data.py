@@ -2,7 +2,6 @@
 
 import os
 import torch
-import numpy as np
 from torch.utils.data import Dataset
 
 
@@ -29,7 +28,7 @@ def load_folder_as_tensor(root_folder, precompute_wavelets_path, wavelet, level)
                     f"or\n"
                     f"  {os.path.join(precompute_wavelets_path, f'level{L}_swt_test_windows_norm.pt')}"
                 )
-        tensor = torch.load(fname)  # could be [N, total_len, (L+1)*feat_dim] or [N, total_len, L+1, feat_dim]
+        tensor = torch.load(fname, weights_only=True)  # [N, total_len, bands, features]
         if tensor.dim() == 3:
             # If shape is [N, T, D], where D = (L+1) * feat_dim, reshape into 4D
             N, T, D = tensor.shape
@@ -76,26 +75,3 @@ class WaveletSlidingWindowDataset(Dataset):
         hist = window[: self.history_len]
         fut = window[self.history_len : self.history_len + self.predict_len]
         return hist, fut
-
-    def inverse_transform(self, flat_wave):
-        """
-        Simplified inverse_transform: use only the final (approximation) band 
-        as the "reconstructed" return. This guarantees a shape of [M, feat_dim=1].
-
-        Accepts either:
-          - flat_wave: numpy array of shape [M, (L+1)*feat_dim]
-          - flat_wave: torch.Tensor of shape [M, (L+1)*feat_dim]
-
-        We simply take the last column (corresponding to the highest‐level approximation band).
-        Returns: a torch.Tensor of shape [M, feat_dim].
-        """
-        # If incoming is a torch.Tensor, convert to numpy first:
-        if isinstance(flat_wave, torch.Tensor):
-            flat_wave = flat_wave.detach().cpu().numpy()
-
-        # Now flat_wave is a NumPy array, shape [M, (L+1)*feat_dim].
-        # We pick the last column (approximation band) as the “return.”
-        approx_band = flat_wave[:, -1]  # shape [M]
-
-        # Reshape to [M, 1] and turn into float32 torch.Tensor:
-        return torch.from_numpy(approx_band.reshape(-1, 1).astype(np.float32))

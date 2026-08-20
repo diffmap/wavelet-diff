@@ -1,5 +1,7 @@
 # src/model/trainer.py
 
+import argparse
+import json
 import os
 import copy
 import numpy as np
@@ -53,6 +55,8 @@ def get_dynamic_mask_ratio(ep, ne, mn, mx):
 
 def train():
     config.ensure_output_dirs()
+    os.makedirs(config.CONFIG["checkpoint_dir"], exist_ok=True)
+    config.seed_everything(config.CONFIG["seed"])
 
     device      = config.CONFIG.get("device", "cuda")
     history_len = config.CONFIG["history_len"]
@@ -91,7 +95,7 @@ def train():
         prefetch_factor=(
             config.CONFIG["prefetch_factor"] if config.CONFIG["num_workers"] > 0 else None
         ),
-        persistent_workers=True                    # keep workers alive across epochs
+        persistent_workers=config.CONFIG["num_workers"] > 0,
     )
 
     # Print how many batches per epoch
@@ -143,6 +147,7 @@ def train():
 
     # 3) Training loop
     epoch_pbar = tqdm(range(config.CONFIG["n_epochs"]), desc="Training Progress")
+    loss_history = []
 
     for epoch in epoch_pbar:
         model.train()
@@ -258,6 +263,7 @@ def train():
 
         scheduler.step()
         epoch_loss = total_loss / len(loader)
+        loss_history.append(epoch_loss)
         epoch_pbar.set_postfix({"Loss": f"{epoch_loss:.4f}"})
 
         if (epoch + 1) % config.CONFIG["checkpoint_freq"] == 0:
@@ -266,16 +272,39 @@ def train():
                 f"{config.CONFIG['save_name']}_ep{epoch+1}.pth"
             )
             torch.save({
+                "epoch": epoch + 1,
+                "epoch_loss": epoch_loss,
+                "loss_history": loss_history,
                 "model": model.state_dict(),
                 "ema": ema_model.state_dict(),
                 "opt": optimizer.state_dict(),
                 "sched": scheduler.state_dict(),
-                "cfg": config.CONFIG
+                "cfg": dict(config.CONFIG),
+                "seed": config.CONFIG["seed"],
             }, ckpt_path)
 
     print("🏁 Training complete.")
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse an optional JSON configuration for a reproducible training run."""
+    parser = argparse.ArgumentParser(description="Train the Wavelet Diff score model.")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="JSON file with values that override src.model.config.CONFIG.",
+    )
+    parser.add_argument("--device", choices=["cpu", "cuda"], default=None)
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+    if args.config is not None:
+        with open(args.config, encoding="utf-8") as config_file:
+            config.CONFIG.update(json.load(config_file))
+    if args.device is not None:
+        config.CONFIG["device"] = args.device
     print("🚀 Starting training")
     train()

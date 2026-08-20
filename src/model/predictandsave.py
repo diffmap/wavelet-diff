@@ -1,5 +1,6 @@
 # src/model/predictandsave.py
 
+import argparse
 import os
 import torch
 import numpy as np
@@ -10,20 +11,10 @@ from datetime import datetime
 
 from src.model.model import ScoreTransformerNet
 from src.model.sde import VPSDE
-from src.model.config import CONFIG, find_latest_checkpoint, ensure_output_dirs
+from src.model.config import CONFIG, find_latest_checkpoint, ensure_output_dirs, seed_everything
 from src.model.data import load_folder_as_tensor, WaveletSlidingWindowDataset
-
-
-def compute_crps(samples: np.ndarray, truth: np.ndarray) -> float:
-    """
-    Continuous Ranked Probability Score for one-dimensional output.
-    `samples`: shape [N_paths, T], `truth`: shape [T].
-    """
-    term1 = np.mean(np.abs(samples - truth), axis=0)
-    term2 = 0.5 * np.mean(
-        np.abs(samples[:, None] - samples[None, :]), axis=(0, 1)
-    )
-    return float(np.mean(term1 - term2))
+from src.model.metrics import compute_crps  # noqa: F401  # Preserve the existing import path.
+from src.model.wavelets import inverse_swt
 
 
 def reverse_sde_sampler(
@@ -50,7 +41,7 @@ def reverse_sde_sampler(
     """
     model_net.eval()
     B, H, Lp, D = history.shape
-    predict_len = CONFIG["predict_len"]
+    predict_len = model_net.predict_len
 
     # Initialize x_T ∼ N(0, I) in normalized wavelet space
     x = torch.randn((B, predict_len, Lp, D), device=device)
@@ -97,8 +88,8 @@ def load_norm_factors(
     if not os.path.isfile(means_f) or not os.path.isfile(stds_f):
         raise FileNotFoundError(f"Normalization files missing in {norm_folder}")
 
-    wavelet_means = torch.load(means_f)  # [L+1, 1]
-    wavelet_stds = torch.load(stds_f)    # [L+1, 1]
+    wavelet_means = torch.load(means_f, weights_only=True)  # [L+1, 1]
+    wavelet_stds = torch.load(stds_f, weights_only=True)    # [L+1, 1]
 
     wm = wavelet_means.numpy()
     ws = wavelet_stds.numpy()
@@ -407,9 +398,14 @@ def predict_and_save_inline(
         print(f"  Window {i}: {paths} paths ({desc})")
 
     print("📂 Loading checkpoint:", checkpoint_path)
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     print("✅ Checkpoint loaded successfully")
     print("📦 Checkpoint keys:", list(ckpt.keys()))
+    checkpoint_cfg = ckpt.get("cfg", {})
+    history_len = int(checkpoint_cfg.get("history_len", history_len))
+    predict_len = int(checkpoint_cfg.get("predict_len", predict_len))
+    wavelet = checkpoint_cfg.get("wavelet", wavelet)
+    level = int(checkpoint_cfg.get("wavelet_level", level))
     print("\n📊 Checkpoint configuration:")
     for key, value in ckpt["cfg"].items():
         print(f"  - {key}: {value}")
@@ -479,33 +475,48 @@ def predict_and_save_inline(
     # ─────────────────────────────────────────────────────────────────────────
     # 6) Instantiate the ScoreTransformer model & SDE
     # ─────────────────────────────────────────────────────────────────────────
+    model_history_len = int(checkpoint_cfg.get("history_len", history_len))
+    model_predict_len = int(checkpoint_cfg.get("predict_len", predict_len))
+    model_input_dim = int(checkpoint_cfg.get("input_dim", input_dim))
+    model_level = int(checkpoint_cfg.get("wavelet_level", level))
     model_net = ScoreTransformerNet(
-        input_dim=input_dim,
-        history_len=history_len,
-        predict_len=predict_len,
-        model_dim=CONFIG["model_dim"],
-        num_heads=CONFIG["num_heads"],
-        num_layers=CONFIG["num_layers"],
-        wavelet_levels=level,
-        mlp_ratio=CONFIG["mlp_ratio"],
-        drop_rate=CONFIG["drop_rate"],
-        attn_drop_rate=CONFIG["attn_drop_rate"]
+        input_dim=model_input_dim,
+        history_len=model_history_len,
+        predict_len=model_predict_len,
+        model_dim=int(checkpoint_cfg.get("model_dim", CONFIG["model_dim"])),
+        num_heads=int(checkpoint_cfg.get("num_heads", CONFIG["num_heads"])),
+        num_layers=int(checkpoint_cfg.get("num_layers", CONFIG["num_layers"])),
+        wavelet_levels=model_level,
+        mlp_ratio=float(checkpoint_cfg.get("mlp_ratio", CONFIG["mlp_ratio"])),
+        drop_rate=float(checkpoint_cfg.get("drop_rate", CONFIG["drop_rate"])),
+        attn_drop_rate=float(checkpoint_cfg.get("attn_drop_rate", CONFIG["attn_drop_rate"]))
     ).to(device)
 
     print("\n📊 Model Architecture:")
-    print(f"  - Input dimension: {input_dim}")
-    print(f"  - Wavelet bands (L+1): {level+1} [cD1,cD2,cD3,cD4,cA4]")
-    print(f"  - Wavelet levels: {level}")
+    print(f"  - Input dimension: {model_input_dim}")
+    print(f"  - Wavelet bands (L+1): {model_level+1} [cD1,cD2,cD3,cD4,cA4]")
+    print(f"  - Wavelet levels: {model_level}")
     print(f"  - Model dimension: {model_net.model_dim}")
-    print(f"  - Number of heads: {CONFIG['num_heads']}")
-    print(f"  - Number of layers: {CONFIG['num_layers']}")
+    print(f"  - Number of heads: {checkpoint_cfg.get('num_heads', CONFIG['num_heads'])}")
+    print(f"  - Number of layers: {checkpoint_cfg.get('num_layers', CONFIG['num_layers'])}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # 7) Load weights from checkpoint (filter unmatched keys)
     # ─────────────────────────────────────────────────────────────────────────
-    checkpoint_dict = ckpt["model"] if "model" in ckpt else ckpt
+    checkpoint_dict = ckpt.get("ema", ckpt.get("model", ckpt)) if isinstance(ckpt, dict) else ckpt
     model_dict = model_net.state_dict()
-    filtered = {k: v for (k, v) in checkpoint_dict.items() if k in model_dict}
+    filtered = {
+        key: value
+        for key, value in checkpoint_dict.items()
+        if key in model_dict and model_dict[key].shape == value.shape
+    }
+    coverage = len(filtered) / len(model_dict)
+    if coverage < 0.9:
+        raise ValueError(
+            f"Checkpoint is incompatible with the current model: "
+            f"matched {len(filtered)}/{len(model_dict)} parameter tensors ({coverage:.1%}). "
+            "Retrain the model with the current source code."
+        )
     model_dict.update(filtered)
     model_net.load_state_dict(model_dict)
     print("✅ Model weights loaded (filtered).")
@@ -554,7 +565,7 @@ def predict_and_save_inline(
             model_net=model_net,
             sde_model=sde_model,
             history=hist_batch,
-            num_steps=CONFIG["num_diffusion_timesteps"],
+            num_steps=num_diffusion_timesteps,
             guidance_weight=guidance_w,
             device=device
         )  # [B, predict_len, 5, feat_dim]
@@ -571,12 +582,16 @@ def predict_and_save_inline(
         # Plot wavelet comparisons
         plot_wavelet_comparison(x_norm_np, x_unnorm, fut_norm_np[None], fut_unnorm, window_dir)
 
-        # Convert wavelets to returns
-        B, T, Lp, Dfeat = x_unnorm.shape
-        flat_wave = x_unnorm.reshape(B * T, Lp * Dfeat)                         # [B*T, 5*feat_dim]
-        recon_flat = test_dataset.inverse_transform(flat_wave)                  # [B*T, feat_dim]
-        recon = recon_flat.reshape(B, T, -1)                                     # [B, T, feat_dim]
-        recon_np = recon.cpu().numpy().squeeze()                                  # [B, T]
+        # Reconstruct from the observed history and sampled future bands.
+        # This preserves the temporal context that the SWT uses at boundaries.
+        history_unnorm = unnormalize_wavelet(
+            hist_norm.cpu().numpy()[None], wavelet_means, wavelet_stds
+        )
+        B = x_unnorm.shape[0]
+        history_unnorm = np.repeat(history_unnorm, B, axis=0)
+        full_wavelet = np.concatenate([history_unnorm, x_unnorm], axis=1)
+        reconstructed = inverse_swt(full_wavelet, CONFIG["wavelet"])
+        recon_np = reconstructed[:, history_len:, :].squeeze(-1)                 # [B, T]
 
         # Plot price comparisons and save statistics
         window_stats = plot_price_comparison(
@@ -609,12 +624,30 @@ def predict_and_save_inline(
     print("\n✅ Prediction generation and plotting complete!")
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse inference options for reproducible sampling runs."""
+    parser = argparse.ArgumentParser(description="Sample forecasts from a trained Wavelet Diff checkpoint.")
+    parser.add_argument("--checkpoint", type=str, default=None)
+    parser.add_argument("--regular-samples", type=int, default=100)
+    parser.add_argument("--regular-windows", type=int, default=1)
+    parser.add_argument("--high-samples", type=int, default=300)
+    parser.add_argument("--no-high-sample", action="store_true")
+    parser.add_argument("--diffusion-steps", type=int, default=CONFIG["num_diffusion_timesteps"])
+    parser.add_argument("--seed", type=int, default=CONFIG["seed"])
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+    seed_everything(args.seed)
+    configs = [(args.regular_samples, f"regular_sample_{index}") for index in range(args.regular_windows)]
+    if not args.no_high_sample:
+        configs.append((args.high_samples, "high_sample"))
     predict_and_save_inline(
-        checkpoint_path=find_latest_checkpoint(),
+        checkpoint_path=args.checkpoint or find_latest_checkpoint(),
         history_len=CONFIG["history_len"],
         predict_len=CONFIG["predict_len"],
         input_dim=CONFIG.get("input_dim", 1),
-        window_configs=None,
-        num_diffusion_timesteps=CONFIG["num_diffusion_timesteps"]
+        window_configs=configs,
+        num_diffusion_timesteps=args.diffusion_steps,
     )

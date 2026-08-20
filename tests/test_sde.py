@@ -1,6 +1,7 @@
 import torch
 
 from src.model.sde import VPSDE
+from src.model.sde import CovariantVPSDE
 
 
 def test_forward_process_near_zero_time_preserves_signal() -> None:
@@ -32,3 +33,14 @@ def test_alpha_is_monotonically_decreasing_in_t() -> None:
     alpha = sde.alpha(t)
 
     assert torch.all(alpha[1:] <= alpha[:-1])
+
+
+def test_covariant_sde_registers_configured_level_buffers() -> None:
+    sde = CovariantVPSDE(num_features=2, num_levels=5)
+    t = torch.full((3, 4), 0.5)
+
+    noise = sde.correlated_noise(t)
+
+    assert sde.level_correlations.shape == (5, 5)
+    assert sde.cholesky_L.shape == (5, 5)
+    assert noise.shape == (3, 4, 5, 2)

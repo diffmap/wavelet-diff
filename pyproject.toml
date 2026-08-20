@@ -7,9 +7,26 @@ name = "wavelet-diff"
 version = "0.1.0"
 description = "Wavelet-conditioned diffusion forecasting for time series data."
 requires-python = ">=3.12"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "PyWavelets",
+    "scipy",
+    "statsmodels",
+    "torch",
+    "tqdm",
+]
+
+[project.scripts]
+wavelet-diff-baselines = "src.benchmarks.rolling_baselines:main"
+wavelet-diff-ablation = "src.benchmarks.baseline_ablation:main"
+wavelet-diff-model-eval = "src.benchmarks.model_rolling_evaluation:main"
+wavelet-diff-guidance-ablation = "src.benchmarks.model_guidance_ablation:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["src*"]
 
 [tool.ruff]
 line-length = 160
