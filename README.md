@@ -6,8 +6,6 @@ The wavelet representation separates a time series into components at multiple t
 The diffusion process generates plausible future trajectories from noisy wavelet coefficients.
 
 The repository contains the model, training code, inverse-SWT reconstruction, rolling-origin evaluation, baseline methods, and unit tests.
-The current-code five-epoch run validates the pipeline only.
-It does not provide a final estimate of model quality.
 
 ## 1. Introduction
 
