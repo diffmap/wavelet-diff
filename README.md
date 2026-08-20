@@ -1,7 +1,5 @@
 # Wavelet Diffusion for Probabilistic Time-Series Forecasting
 
-## Abstract
-
 This project studies a diffusion model for probabilistic forecasting of financial time series.
 The model combines a Transformer score network with a stationary wavelet transform (SWT).
 The wavelet representation separates a time series into components at multiple temporal scales.
