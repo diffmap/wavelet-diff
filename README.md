@@ -107,7 +107,7 @@ This procedure turns a noise sample into a future trajectory conditioned on the 
 For the variance-preserving SDE used by this project, the drift and diffusion coefficients are:
 
 $$
-f(z,t) = -\frac{1}{2}\beta(t)z,\qquadg(t) = \sqrt{\beta(t)}.
+f(z,t) = -\frac{1}{2}\beta(t)z,\qquad g(t) = \sqrt{\beta(t)}.
 $$
 
 The corresponding perturbation has the form:
@@ -160,13 +160,18 @@ $$
 The resulting ensemble approximates the conditional forecast distribution:
 
 $$
-\left\{\hat{y}_{H+1:H+K}^{(m)}\right\}_{m=1}^{M}\sim p_\theta\left(y_{H+1:H+K}\mid y_{1:H}\right).
+\{\hat{\mathbf{y}}_{H+1:H+K}^{(m)}\}_{m=1}^{M}
+\overset{\mathrm{i.i.d.}}{\sim}
+p_\theta(
+\mathbf{y}_{H+1:H+K} \mid \mathbf{y}_{1:H}
+).
 $$
 
 The training objective combines a score-matching term with a multiscale reconstruction term:
 
 $$
-\mathcal{L}= \mathcal{L}_{\mathrm{score}}  + \lambda_{\mathrm{wavelet}}\mathcal{L}_{\mathrm{wavelet}}.$$
+\mathcal{L}= \mathcal{L}_{\mathrm{score}}  + \lambda_{\mathrm{wavelet}}\mathcal{L}_{\mathrm{wavelet}}
+$$
 
 The score term trains the diffusion model to estimate the denoising direction.
 The wavelet term preserves consistency across the predicted frequency bands.
