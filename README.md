@@ -39,9 +39,7 @@ $$
 At diffusion time $t$, the conditional score function is:
 
 $$
-s_\theta(z_t,t,c)
-\approx
-\nabla_{z_t}\log p_t(z_t \mid c).
+s_\theta(z_t,t,c)\approx\nabla_{z_t}\log p_t(z_t \mid c).
 $$
 
 This score gives the denoising direction for the noisy future coefficients $z_t$.
@@ -93,23 +91,13 @@ $$
 The training objective compares the neural score with this target across noise times and forecast contexts:
 
 $$
-\mathcal{L}_{\mathrm{score}}
-= \mathbb{E}_{t,z_0,\epsilon}
-\left[
-\lambda(t)
-\left\|
-s_\theta(z_t,t,c) + \frac{\epsilon}{\sigma(t)}
-\right\|_2^2
-\right].
+\mathcal{L}_{\mathrm{score}}= \mathbb{E}_{t,z_0,\epsilon}\left[\lambda(t)\left\|s_\theta(z_t,t,c) + \frac{\epsilon}{\sigma(t)}\right\|_2^2\right].
 $$
 
 The reverse-time SDE uses the learned score to remove noise:
 
 $$
-\mathrm{d}z
-= \left[f(z,t) - g(t)^2 s_\theta(z,t,c)\right]\mathrm{d}t
-  + g(t)\,\mathrm{d}\bar{w},
-\qquad \mathrm{d}t < 0.
+\mathrm{d}z= \left[f(z,t) - g(t)^2 s_\theta(z,t,c)\right]\mathrm{d}t  + g(t)\,\mathrm{d}\bar{w},\qquad \mathrm{d}t < 0.
 $$
 
 The sampler starts with $z_T$ drawn from Gaussian noise and integrates this equation backward to $t=0$.
@@ -119,16 +107,13 @@ This procedure turns a noise sample into a future trajectory conditioned on the 
 For the variance-preserving SDE used by this project, the drift and diffusion coefficients are:
 
 $$
-f(z,t) = -\frac{1}{2}\beta(t)z,
-\qquad
-g(t) = \sqrt{\beta(t)}.
+f(z,t) = -\frac{1}{2}\beta(t)z,\qquadg(t) = \sqrt{\beta(t)}.
 $$
 
 The corresponding perturbation has the form:
 
 $$
-z_t = \exp\left(-\frac{1}{2}\int_0^t \beta(u)\,\mathrm{d}u\right)z_0
-      + \sqrt{1-\exp\left(-\int_0^t \beta(u)\,\mathrm{d}u\right)}\,\epsilon.
+z_t = \exp\left(-\frac{1}{2}\int_0^t \beta(u)\,\mathrm{d}u\right)z_0      + \sqrt{1-\exp\left(-\int_0^t \beta(u)\,\mathrm{d}u\right)}\,\epsilon.
 $$
 
 This parameterization connects the continuous SDE to the familiar discrete diffusion schedule.
@@ -169,17 +154,13 @@ The inverse SWT maps that sample back to the signal domain.
 
 For each sampled coefficient trajectory $\hat{z}_0^{(m)}$, the forecast is reconstructed as:
 
-$$
-\hat{y}_{H+1:H+K}^{(m)}
-= \mathcal{W}^{-1}\left(\hat{z}_0^{(m)}\right),
-\qquad m = 1,\ldots,M.
+$$\hat{y}_{H+1:H+K}^{(m)}= \mathcal{W}^{-1}\left(\hat{z}_0^{(m)}\right),\qquad m = 1,\ldots,M.
 $$
 
 The resulting ensemble approximates the conditional forecast distribution:
 
 $$
-\left\{\hat{y}_{H+1:H+K}^{(m)}\right\}_{m=1}^{M}
-\sim p_\theta\left(y_{H+1:H+K}\mid y_{1:H}\right).
+\left\{\hat{y}_{H+1:H+K}^{(m)}\right\}_{m=1}^{M}\sim p_\theta\left(y_{H+1:H+K}\mid y_{1:H}\right).
 $$
 
 The training objective combines a score-matching term with a multiscale reconstruction term:
@@ -203,11 +184,7 @@ $$
 During sampling, an Euler–Maruyama step for reverse time uses a negative step size $\Delta t$:
 
 $$
-z_{t+\Delta t}
-= z_t
- + \left[f(z_t,t)-g(t)^2s_\theta(z_t,t,c)\right]\Delta t
- + g(t)\sqrt{|\Delta t|}\,\xi_t,
-\qquad \xi_t\sim\mathcal{N}(0,I).
+z_{t+\Delta t}= z_t + \left[f(z_t,t)-g(t)^2s_\theta(z_t,t,c)\right]\Delta t + g(t)\sqrt{|\Delta t|}\,\xi_t,\qquad \xi_t\sim\mathcal{N}(0,I).
 $$
 
 ```mermaid
