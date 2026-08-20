@@ -52,33 +52,94 @@ The inverse SWT maps each generated coefficient sample back to a future trajecto
 
 *Figure 1. The conditional score network uses the observed history to guide the reverse-SDE trajectory from noise to forecast samples.*
 
-## 2. Diffusion background
+## 2. Score-based diffusion background
 
-Let $x_0$ denote a clean data sample.
-The forward diffusion process defines increasingly noisy variables:
-
-$$
-q(x_t \mid x_{t-1}) = \mathcal{N}\left(x_t; \sqrt{1-\beta_t}\,x_{t-1},\; \beta_t I\right),
-\qquad t = 1, \ldots, T.
-$$
-
-Here, $\beta_t$ controls the noise added at step $t$.
-With $\bar{\alpha}_t = \prod_{s=1}^{t}(1-\beta_s)$, the noisy sample has the closed form:
+Score-based modeling represents a probability distribution through the gradient of its log density.
+For a random variable $z$ with density $p(z)$, the score function is:
 
 $$
-x_t = \sqrt{\bar{\alpha}_t}\,x_0 + \sqrt{1-\bar{\alpha}_t}\,\epsilon,
-\qquad \epsilon \sim \mathcal{N}(0,I).
+s(z) = \nabla_z \log p(z).
 $$
 
-The reverse model learns a score or a noise estimate that identifies the direction toward less noisy data.
-At inference time, the sampler starts with $x_T \sim \mathcal{N}(0,I)$ and applies the learned reverse dynamics.
-The DDPM formulation provides the foundation for this denoising procedure ([Ho et al., 2020](https://arxiv.org/abs/2006.11239)).
+The score points toward regions of higher probability.
+It provides a useful representation because the gradient removes any constant normalizing factor in $p(z)$.
+The neural network therefore learns a vector field instead of predicting a normalized density.
+This score-based view follows the formulation described by [Song (2021)](https://yang-song.net/blog/2021/score/).
+
+The data distribution is perturbed with a continuous noise process:
+
+$$
+\mathrm{d}z = f(z,t)\,\mathrm{d}t + g(t)\,\mathrm{d}w,
+$$
+
+where $f$ is the drift, $g$ controls the noise magnitude, and $w$ is Brownian motion.
+At $t=0$, $z$ follows the data distribution.
+At a sufficiently large terminal time $T$, $z_T$ approaches a tractable Gaussian prior.
+
+The network learns the time-dependent conditional score:
+
+$$
+s_\theta(z_t,t,c)
+\approx
+\nabla_{z_t}\log p_t(z_t \mid c).
+$$
+
+For a perturbation written as $z_t = \alpha(t)z_0 + \sigma(t)\epsilon$, with $\epsilon \sim \mathcal{N}(0,I)$, denoising score matching uses the Gaussian conditional score target:
+
+$$
+\nabla_{z_t}\log q(z_t \mid z_0) = -\frac{\epsilon}{\sigma(t)}.
+$$
+
+The training objective compares the neural score with this target across noise times and forecast contexts:
+
+$$
+\mathcal{L}_{\mathrm{score}}
+= \mathbb{E}_{t,z_0,\epsilon}
+\left[
+\lambda(t)
+\left\|
+s_\theta(z_t,t,c) + \frac{\epsilon}{\sigma(t)}
+\right\|_2^2
+\right].
+$$
+
+The reverse-time SDE uses the learned score to remove noise:
+
+$$
+\mathrm{d}z
+= \left[f(z,t) - g(t)^2 s_\theta(z,t,c)\right]\mathrm{d}t
+  + g(t)\,\mathrm{d}\bar{w},
+\qquad \mathrm{d}t < 0.
+$$
+
+The sampler starts with $z_T$ drawn from Gaussian noise and integrates this equation backward to $t=0$.
+The context $c$ stays fixed during sampling, so it guides the score at every denoising step.
+This procedure turns a noise sample into a future trajectory conditioned on the observed history.
+
+For the variance-preserving SDE used by this project, the drift and diffusion coefficients are:
+
+$$
+f(z,t) = -\frac{1}{2}\beta(t)z,
+\qquad
+g(t) = \sqrt{\beta(t)}.
+$$
+
+The corresponding perturbation has the form:
+
+$$
+z_t = \exp\left(-\frac{1}{2}\int_0^t \beta(u)\,\mathrm{d}u\right)z_0
+      + \sqrt{1-\exp\left(-\int_0^t \beta(u)\,\mathrm{d}u\right)}\,\epsilon.
+$$
+
+This parameterization connects the continuous SDE to the familiar discrete diffusion schedule.
+Small values of $t$ preserve more information from $z_0$.
+Large values of $t$ produce samples that approach Gaussian noise.
 
 ![Forward diffusion adds Gaussian noise to a clean frame.](docs/images/diffusion_forward_process.png)
 
 *Figure 2. A visual analogy for the forward diffusion process.*
 The figure uses a video-like frame to show progressive noise addition.
-This project applies the same idea to numerical time-series windows and wavelet coefficients.
+This project applies the same process to numerical time-series windows and wavelet coefficients.
 
 ## 3. Wavelet representation
 
@@ -106,6 +167,21 @@ The Transformer score network receives the observed history, noisy future coeffi
 The reverse SDE generates a sample of future wavelet coefficients.
 The inverse SWT maps that sample back to the signal domain.
 
+For each sampled coefficient trajectory $\hat{z}_0^{(m)}$, the forecast is reconstructed as:
+
+$$
+\hat{y}_{H+1:H+K}^{(m)}
+= \mathcal{W}^{-1}\left(\hat{z}_0^{(m)}\right),
+\qquad m = 1,\ldots,M.
+$$
+
+The resulting ensemble approximates the conditional forecast distribution:
+
+$$
+\left\{\hat{y}_{H+1:H+K}^{(m)}\right\}_{m=1}^{M}
+\sim p_\theta\left(y_{H+1:H+K}\mid y_{1:H}\right).
+$$
+
 The training objective combines a score-matching term with a multiscale reconstruction term:
 
 $$
@@ -114,6 +190,25 @@ $$
 The score term trains the diffusion model to estimate the denoising direction.
 The wavelet term preserves consistency across the predicted frequency bands.
 The implementation uses a variance-preserving SDE and a Transformer score network.
+
+The multiscale term compares the reconstructed coefficients with the observed future coefficients:
+
+$$
+\mathcal{L}_{\mathrm{wavelet}}
+= \left\|
+\hat{z}_0 - \mathcal{W}\left(y_{H+1:H+K}\right)
+\right\|_2^2.
+$$
+
+During sampling, an Euler–Maruyama step for reverse time uses a negative step size $\Delta t$:
+
+$$
+z_{t+\Delta t}
+= z_t
+ + \left[f(z_t,t)-g(t)^2s_\theta(z_t,t,c)\right]\Delta t
+ + g(t)\sqrt{|\Delta t|}\,\xi_t,
+\qquad \xi_t\sim\mathcal{N}(0,I).
+$$
 
 ```mermaid
 flowchart LR
@@ -131,34 +226,7 @@ flowchart LR
     iswt --> forecast[Probabilistic forecast samples]
 ```
 
-## 5. Data and experimental protocol
-
-The project uses Bitcoin price data and models log returns rather than raw prices.
-The data pipeline creates training and testing windows from local CSV files.
-The default evaluation uses 50 observations of history and a 20-observation forecast horizon.
-
-The rolling-origin evaluator prevents future observations from entering a forecast input.
-At each origin, a forecast function receives only the preceding history window.
-The evaluator reports mean absolute error (MAE), root mean squared error (RMSE), CRPS, and interval coverage.
-
-The repository includes three simple baselines:
-
-1. Zero return predicts a zero future return at every step.
-2. Last return repeats the most recent observed return.
-3. Historical bootstrap samples observed returns from the available history.
-
-The baseline protocol uses 51 test origins, 100 samples for stochastic forecasts, and seed 42.
-
-| Baseline | MAE | RMSE | CRPS | 50% coverage | 90% coverage | Origins |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Zero return | 0.01819 | 0.02508 | 0.01819 | 0.000 | 0.000 | 51 |
-| Last return | 0.02473 | 0.03113 | 0.02473 | 0.000 | 0.000 | 51 |
-| Historical bootstrap | 0.01841 | 0.02530 | 0.01413 | 0.485 | 0.864 | 51 |
-
-These values are baseline measurements.
-They do not represent a final diffusion-model result.
-
-## 6. Qualitative results
+## 5. Qualitative results
 
 Figure 3 shows the full price and wavelet-band history.
 The vertical split separates the training and test ranges.
@@ -168,7 +236,7 @@ The lower panels show the detail and approximation bands used by the model.
 
 *Figure 3. The Bitcoin price series, daily log returns, and five wavelet bands.*
 
-Figures 3–5 show historical prediction outputs.
+The following examples show historical prediction outputs.
 The blue line shows the history, the green line shows the true future, and the red dashed line shows the median prediction.
 The shaded regions show the 80% interval and the interquartile range.
 These figures demonstrate the forecast and uncertainty visualizations produced by the project.
@@ -180,7 +248,7 @@ They are qualitative historical outputs, not a controlled final benchmark.
 | Window 834 | ![Price forecast for window 834](docs/images/price_forecast_window_834.png) |
 | Window 453 | ![Price forecast for window 453](docs/images/price_forecast_window_453.png) |
 
-## 7. Reproducibility
+## 6. Reproducibility
 
 Create the Conda environment and install the package:
 
@@ -219,7 +287,7 @@ python -m src.benchmarks.model_rolling_evaluation \
   --output outputs/model_metrics.csv
 ```
 
-## 8. Limitations
+## 7. Limitations
 
 The repository does not include a final current-code model quality table.
 The available current-code run uses five epochs and acts as a pipeline smoke test.
@@ -230,6 +298,7 @@ Training and prediction require local data that the repository does not store.
 
 1. Ho, J., Jain, A., and Abbeel, P. *Denoising Diffusion Probabilistic Models*. 2020. [arXiv:2006.11239](https://arxiv.org/abs/2006.11239).
 2. Nason, G. P. and von Sachs, R. *Wavelet Processes and Adaptive Estimation of the Evolutionary Wavelet Spectrum*. 1999. [Biometrika](https://doi.org/10.1093/biomet/86.4.873).
+3. Song, Y. *Generative Modeling by Estimating Gradients of the Data Distribution*. 2021. [Score-based modeling overview](https://yang-song.net/blog/2021/score/).
 
 ## License
 
