@@ -1,0 +1,19 @@
+name: wavelet-diff
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pytorch
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - statsmodels
+  - tqdm
+  - pip
+  - pip:
+      - PyWavelets
+      - pytest
+      - ruff

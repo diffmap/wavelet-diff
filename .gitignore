@@ -1,0 +1,27 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.venv/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Generated model and forecast artifacts
+outputs/checkpoints/
+outputs/predictions/
+outputs/*.png
+HyperParams/
+
+# Generated wavelet tensors
+data/wavelets/
+
+# Large local datasets
+data/Raw/
+data/Training Data/
+data/Testing Data/
